@@ -5,6 +5,10 @@ import meshtastic.serial_interface
 from pubsub import pub
 
 TARGET_NODE_ID = "!b03dca70"  # Change if your target node changes
+log_file = "log.txt"
+
+received_ids = []
+
 
 def handle_packet(packet):
     decoded = packet.get("decoded", {})
@@ -14,6 +18,20 @@ def handle_packet(packet):
         snr = packet.get("rxSnr", "?")
         rssi = packet.get("rxRssi", "?")
         print(f"\nText received from {from_id}: {text} (SNR: {snr}, RSSI: {rssi} dBm)")
+        update_rx_ids(from_id)
+        update_message_dict(from_id, text, snr, rssi)
+
+
+
+def update_rx_ids(from_id):
+    if from_id not in received_ids:
+        received_ids.append(from_id)
+    print(f"Received ID List: {received_ids}")
+
+def update_message_dict(from_id, text, snr, rssi):
+    with open(log_file, 'a') as lf:
+        lf.write(f"{from_id}, {text}, {snr}, {rssi}\n")
+        #print(f"{from_id}, {text}, {snr}, {rssi}")
 
 def send_loop(interface):
     while True:
@@ -35,6 +53,8 @@ def main():
     except Exception as e:
         print(f"Error opening serial port: {e}")
         return
+
+    interface.sendText("I'm up!", destinationId=TARGET_NODE_ID)
 
     time.sleep(2)
     interface.connect()
