@@ -8,3 +8,7 @@ Additionally, you must set the destination node ID in this line:
 
 You can find your node ID by receiving a message from your T-Beam using main.py:
 ![image](https://github.com/user-attachments/assets/dbe64f75-50f2-48e3-8aed-2336692191e5)
+
+Once everything is working your console output shoul look like this:
+![image](https://github.com/user-attachments/assets/fa01cef3-82cc-4cd0-b01c-b30df4ee8ef4)
+
