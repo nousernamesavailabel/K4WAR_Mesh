@@ -98,7 +98,7 @@ def main():
     message_entry_label.grid(row=1, column=0)
 
 
-    message_entry = tk.Entry(main_window, textvariable="Test")
+    message_entry = tk.Entry(main_window)
     message_entry.grid(row=1, column=1)
 
     send_button = tk.Button(main_window, text="Send", command = send_text)
