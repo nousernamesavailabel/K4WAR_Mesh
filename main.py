@@ -5,105 +5,152 @@ import meshtastic.serial_interface
 from pubsub import pub
 import tkinter as tk
 from tkinter import messagebox
+from tkinter import scrolledtext
+import json
 
 TARGET_NODE_ID = "!b03dca70"
-log_file = "log.txt"
-received_ids = []
-interface = None  # Define globally so other threads can use it
+LOG_FILE = "log.txt"
+IDENTITY_FILE = "ident.txt"
 
-def handle_packet(packet):
-    decoded = packet.get("decoded", {})
-    if decoded.get("portnum") == "TEXT_MESSAGE_APP":
-        from_id = packet.get("fromId", "unknown")
-        text = decoded.get("text", "<no text>")
-        snr = packet.get("rxSnr", "?")
-        rssi = packet.get("rxRssi", "?")
-        print(f"\nText received from {from_id}: {text} (SNR: {snr}, RSSI: {rssi} dBm)")
-        update_rx_ids(from_id)
-        update_message_dict(from_id, text, snr, rssi)
+class MeshtasticGUI:
+    def __init__(self):
+        self.interface = None
+        self.received_ids = []
 
-def update_rx_ids(from_id):
-    if from_id not in received_ids:
-        received_ids.append(from_id)
-    print(f"Received ID List: {received_ids}")
+        self.com_window = None
+        self.com_port_entry = None
 
-def update_message_dict(from_id, text, snr, rssi):
-    with open(log_file, 'a') as lf:
-        lf.write(f"{from_id}, {text}, {snr}, {rssi}\n")
+        self.main_window = None
+        self.message_entry = None
 
-def send_loop():
-    while True:
+        self.build_com_window()
+
+    def handle_packet(self, packet):
+        decoded = packet.get("decoded", {})
+        #print(f"Raw Decode: {decoded}")
+        if decoded.get("portnum") == "TEXT_MESSAGE_APP":
+            from_id = packet.get("fromId", "unknown")
+            text = decoded.get("text", "<no text>")
+            snr = packet.get("rxSnr", "?")
+            rssi = packet.get("rxRssi", "?")
+            print(f"\nText received from {from_id}: {text} (SNR: {snr}, RSSI: {rssi} dBm)")
+            self.update_rx_ids(from_id)
+            self.update_message_dict(from_id, text, snr, rssi)
+            self.update_scrolled_text(from_id, text, snr, rssi, 'RX')
+        elif decoded.get("portnum") == "TELEMETRY_APP":
+            from_id = packet.get("fromId", "unknown")
+            telemetry = decoded.get("telemetry", {})
+            device_metrics = telemetry.get("deviceMetrics", {})
+            voltage = device_metrics.get("voltage", "?")
+            battery = device_metrics.get("batteryLevel", "?")
+            print(f"{self.lookup_identity(from_id)} -- Voltage: {voltage}\tBat Level: {battery}")
+
+
+    def update_rx_ids(self, from_id):
+        if from_id not in self.received_ids:
+            self.received_ids.append(from_id)
+        print(f"Received ID List: {self.received_ids}")
+
+    def update_message_dict(self, from_id, text, snr, rssi):
+        with open(LOG_FILE, 'a') as lf:
+            lf.write(f"{from_id}, {text}, {snr}, {rssi}\n")
+
+    import json
+
+    def lookup_identity(self, from_id):
         try:
-            msg = input("Enter message to send (or 'exit' to quit): ")
-            if msg.lower() == "exit":
-                break
-            interface.sendText(msg, destinationId=TARGET_NODE_ID)
-            print(f"Sent {msg} to {TARGET_NODE_ID}")
+            with open(IDENTITY_FILE, 'r') as IDF:
+                identities = json.load(IDF)
+                return identities.get(from_id, f"No Identity, {from_id}")
         except Exception as e:
-            print(f"Error sending message: {e}")
+            print(f"Error loading identity file: {e}")
+            return from_id
 
-def send_text():
-    global message_entry
-    try:
-        msg = message_entry.get()
-        interface.sendText(msg, destinationId=TARGET_NODE_ID)
-        print(f"Sent {msg} to {TARGET_NODE_ID}")
-    except:
-        print("Unable to send message.")
+    def update_scrolled_text(self, from_id, text, snr, rssi, rxtx):
+        id = self.lookup_identity(from_id)
+        string = (f"{rxtx}: {id}: {text}")
+        self.message_log.config(state='normal')
+        self.message_log.insert(tk.END, string + '\n')
+        self.message_log.see(tk.END)
+        self.message_log.config(state='disabled')
 
-def com_connect():
-    global interface
-    com_port = com_port_entry.get().upper()
-    if not com_port.startswith("COM") or len(com_port) < 4:
-        messagebox.showerror("Invalid Port", "Please enter a valid COM port (e.g., COM5)")
-        return
+    def send_loop(self):
+        while True:
+            try:
+                msg = input("Enter message to send (or 'exit' to quit): ")
+                if msg.lower() == "exit":
+                    break
+                self.interface.sendText(msg, destinationId=TARGET_NODE_ID)
+                print(f"Sent {msg} to {TARGET_NODE_ID}")
+            except Exception as e:
+                print(f"Error sending message: {e}")
 
-    try:
-        print(f"Attempting to connect to {com_port}...")
-        interface = meshtastic.serial_interface.SerialInterface(devPath=com_port, connectNow=False)
-        time.sleep(2)
-        interface.connect()
-        pub.subscribe(handle_packet, "meshtastic.receive")
-        interface.sendText("I'm up!", destinationId=TARGET_NODE_ID)
-        messagebox.showinfo("Connected", f"Connected to {com_port}")
-        com_window.destroy()
+    def send_text(self):
+        try:
+            msg = self.message_entry.get()
+            self.interface.sendText(msg, destinationId=TARGET_NODE_ID)
+            self.update_scrolled_text('Me', msg, 'NA', 'NA', 'TX')
+            print(f"Sent {msg} to {TARGET_NODE_ID}")
+        except:
+            print("Unable to send message.")
 
-        # Start text input loop in background thread
-        threading.Thread(target=send_loop, daemon=True).start()
+    def com_connect(self):
+        com_port = self.com_port_entry.get().upper()
+        if not com_port.startswith("COM") or len(com_port) < 4:
+            messagebox.showerror("Invalid Port", "Please enter a valid COM port (e.g., COM5)")
+            return
 
-    except Exception as e:
-        print(f"Connection failed: {e}")
-        messagebox.showerror("Connection Error", f"Failed to connect: {e}")
+        try:
+            print(f"Attempting to connect to {com_port}...")
+            self.interface = meshtastic.serial_interface.SerialInterface(devPath=com_port, connectNow=False)
+            time.sleep(2)
+            self.interface.connect()
+            pub.subscribe(self.handle_packet, "meshtastic.receive")
+            self.interface.sendText("I'm up!", destinationId=TARGET_NODE_ID)
+            messagebox.showinfo("Connected", f"Connected to {com_port}")
+            self.com_window.destroy()
 
-def main():
-    global com_window
-    global com_port_entry
-    global message_entry
+            # Start input thread
+            #threading.Thread(target=self.send_loop, daemon=True).start()
 
-    com_window = tk.Tk()
-    com_window.title("Meshtastic COM Connector")
+            self.build_main_window()
 
-    tk.Label(com_window, text="Enter COM Port (e.g., COM5):").grid(row=0, column=0)
-    com_port_entry = tk.Entry(com_window)
-    com_port_entry.grid(row=0, column=1)
+        except Exception as e:
+            print(f"Connection failed: {e}")
+            messagebox.showerror("Connection Error", f"Failed to connect: {e}")
 
-    tk.Button(com_window, text="Connect", command=com_connect).grid(row=1, column=0, columnspan=2)
-    com_window.mainloop()
+    def build_com_window(self):
+        self.com_window = tk.Tk()
+        self.com_window.title("Meshtastic COM Connector")
 
-    main_window = tk.Tk()
-    #head_label = tk.Label(text="It works")
-    #head_label.grid(row=0, column=0)
+        tk.Label(self.com_window, text="Enter COM Port (e.g., COM5):").grid(row=0, column=0)
+        self.com_port_entry = tk.Entry(self.com_window)
+        self.com_port_entry.grid(row=0, column=1)
 
-    message_entry_label = tk.Label(main_window, text="Message to send: ")
-    message_entry_label.grid(row=1, column=0)
+        tk.Button(self.com_window, text="Connect", command=self.com_connect).grid(row=1, column=0, columnspan=2)
+        self.com_window.mainloop()
 
+    import tkinter.scrolledtext as scrolledtext  # ensure this is imported
 
-    message_entry = tk.Entry(main_window)
-    message_entry.grid(row=1, column=1)
+    def build_main_window(self):
+        self.main_window = tk.Tk()
+        self.main_window.title("Meshtastic Messenger")
 
-    send_button = tk.Button(main_window, text="Send", command = send_text)
-    send_button.grid(row=2, column=0, columnspan=2)
-    main_window.mainloop()
+        # Message log (ScrolledText)
+        self.message_log = scrolledtext.ScrolledText(self.main_window, state='disabled', wrap=tk.WORD, height=20,
+                                                     width=60)
+        self.message_log.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
+
+        # Message input
+        tk.Label(self.main_window, text="Message to send:").grid(row=1, column=0)
+        self.message_entry = tk.Entry(self.main_window)
+        self.message_entry.grid(row=1, column=1)
+
+        # Send button
+        tk.Button(self.main_window, text="Send", command=self.send_text).grid(row=2, column=0, columnspan=2)
+
+        self.main_window.mainloop()
+
 
 if __name__ == "__main__":
-    main()
+    MeshtasticGUI()
