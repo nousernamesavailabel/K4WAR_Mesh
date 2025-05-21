@@ -3,6 +3,7 @@ import threading
 import meshtastic
 import meshtastic.serial_interface
 from pubsub import pub
+import zlib
 
 TARGET_NODE_ID = "!b03dca70"  # Change if your target node changes
 
@@ -10,7 +11,12 @@ def handle_packet(packet):
     decoded = packet.get("decoded", {})
     if decoded.get("portnum") == "TEXT_MESSAGE_APP":
         from_id = packet.get("fromId", "unknown")
-        text = decoded.get("text", "<no text>")
+        compressed_text = decoded.get("text", b"")
+        try:
+            # Decompress the received data
+            text = zlib.decompress(compressed_text).decode('utf-8')
+        except Exception as e:
+            text = f"<Error decompressing message: {e}>"
         snr = packet.get("rxSnr", "?")
         rssi = packet.get("rxRssi", "?")
         print(f"\nText received from {from_id}: {text} (SNR: {snr}, RSSI: {rssi} dBm)")
@@ -19,9 +25,10 @@ def send_loop(interface):
     while True:
         try:
             msg = input("Enter message to send (or 'exit' to quit): ")
+            compressed_msg = zlib.compress(msg.encode('utf-8'), level=zlib.Z_BEST_COMPRESSION)
             if msg.lower() == "exit":
                 break
-            interface.sendText(msg, destinationId=TARGET_NODE_ID)
+            interface.sendData(compressed_msg, destinationId=TARGET_NODE_ID)
         except Exception as e:
             print(f"Error sending message: {e}")
 
