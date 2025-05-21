@@ -27,7 +27,11 @@ def send_loop(interface):
 
 def main():
     try:
-        interface = meshtastic.serial_interface.SerialInterface(devPath="COM5", connectNow=False)
+        while True:
+            com_port = input("What port is your meshtastic connected to (COM1,COM2,COMN...)? ").upper()
+            if com_port[:3] == "COM" and len(com_port) == 4:
+                interface = meshtastic.serial_interface.SerialInterface(devPath=com_port, connectNow=False)
+                break
     except Exception as e:
         print(f"Error opening serial port: {e}")
         return
